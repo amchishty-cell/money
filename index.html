@@ -1,0 +1,1753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Money Map</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    /* Simple loading state shown before React mounts */
+    #root:empty::before {
+      content: "Loading Money Map…";
+      display: block;
+      padding: 3rem;
+      text-align: center;
+      color: #a8a29e;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body class="bg-stone-50">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    // ---- Pull globals from UMD bundles ----
+    const { useState, useEffect, useMemo, useRef } = React;
+    const {
+      BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+      LineChart, Line, Legend, CartesianGrid, AreaChart, Area
+    } = Recharts;
+    const Papa = window.Papa;
+
+
+    // ---- Inline icon components (Lucide-style, self-contained, no CDN dependency) ----
+    const _icon = (paths) => ({ className = '', size, ...rest }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size || 24} height={size || 24}
+           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+           strokeLinecap="round" strokeLinejoin="round" className={className} {...rest}
+           dangerouslySetInnerHTML={{ __html: paths }} />
+    );
+    const Upload = _icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>');
+    const X = _icon('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>');
+    const ChevronRight = _icon('<polyline points="9 18 15 12 9 6"/>');
+    const TrendingUp = _icon('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>');
+    const TrendingDown = _icon('<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>');
+    const DollarSign = _icon('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>');
+    const Target = _icon('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>');
+    const Zap = _icon('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
+    const AlertCircle = _icon('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>');
+    const Heart = _icon('<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>');
+    const MessageCircle = _icon('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>');
+    const Send = _icon('<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>');
+    const Edit2 = _icon('<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>');
+    const Check = _icon('<polyline points="20 6 9 17 4 12"/>');
+    const RefreshCw = _icon('<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>');
+    const Cloud = _icon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>');
+    const CloudOff = _icon('<path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"/><line x1="1" y1="1" x2="23" y2="23"/>');
+
+
+    // ---- Shim window.storage (artifact API) with localStorage for GitHub Pages ----
+    if (!window.storage) {
+      window.storage = {
+        get: async (key) => {
+          try { const v = localStorage.getItem(key); return v !== null ? { value: v } : null; }
+          catch { return null; }
+        },
+        set: async (key, value) => {
+          try { localStorage.setItem(key, value); return { value }; } catch { return null; }
+        },
+        delete: async (key) => {
+          try { localStorage.removeItem(key); return { deleted: true }; } catch { return null; }
+        }
+      };
+    }
+
+    // ---- Dashboard code ----
+
+
+
+
+
+const STORAGE_KEY = 'finance_data_v3';
+const BUDGET_KEY = 'finance_budgets_v3';
+const LOAN_KEY = 'finance_loans_v3';
+const SETTINGS_KEY = 'finance_settings_v3';
+const OVERRIDES_KEY = 'finance_overrides_v3';
+const GOAL_KEY = 'finance_goal_v3';
+const GOOGLE_TOKEN_KEY = 'finance_google_token_v3';
+const GOOGLE_AUTO_KEY = 'finance_google_auto_v3';
+
+// ---- Google Sheets config ----
+// Client ID is public-safe (JS origin restriction in Cloud Console is what protects it).
+// Replace with your own if you deploy this elsewhere.
+const GOOGLE_CLIENT_ID = '1092422382179-4ijkareske29kgi7es4r1ca1tbqfqumi.apps.googleusercontent.com';
+const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const TILLER_SHEET_ID = '1bSCMcSWyflpVWzHJBoNasADSZRmnxssBq91eMh-zUs8';
+const TILLER_TAB = 'Transactions';
+
+// ---- Category rules (fallback when Tiller Category Hint is empty) ----
+const categoryRules = [
+  { cat: 'Rent/Housing', patterns: [/rent/i, /bilt/i, /property mgmt/i] },
+  { cat: 'Utilities', patterns: [/pg&e/i, /\bpge\b/i, /comcast/i, /xfinity/i, /at&t/i, /verizon/i, /t-mobile/i] },
+  { cat: 'Groceries', patterns: [/safeway/i, /trader joe/i, /whole foods/i, /grocery/i, /costco/i, /sprouts/i, /ranch 99/i, /h mart/i, /99 ranch/i, /lucky/i, /food maxx/i] },
+  { cat: 'Restaurants', patterns: [/restaurant/i, /tst\*/i, /sq \*/i, /toast/i, /chipotle/i, /panera/i, /starbucks/i, /coffee/i, /cafe/i, /pizza/i, /sushi/i, /thai/i, /chinese/i, /mexican/i, /grill/i, /kitchen/i, /bistro/i, /diner/i, /freewheel/i, /china palace/i, /alcosta/i, /elpolloloco/i, /manakish/i, /dough zone/i, /breakfast/i, /hamburguesa/i, /cousins maine/i, /renderjuice/i] },
+  { cat: 'Food Delivery', patterns: [/uber.*eats/i, /doordash/i, /grubhub/i, /postmates/i, /ubereats/i] },
+  { cat: 'Subscriptions', patterns: [/netflix/i, /hulu/i, /spotify/i, /apple\.com\/bill/i, /apple bill/i, /youtube premium/i, /disney/i, /\bhbo\b/i, /paramount/i, /peacock/i, /mubi/i, /flickr/i, /epidemic sound/i, /vercel/i, /adobe/i, /dropbox/i, /icloud/i, /1password/i, /notion/i, /github/i, /openai/i, /chatgpt/i, /midjourney/i, /audible/i, /amazon prime/i, /prime video/i, /elevenlabs/i, /anthropic/i, /claude/i] },
+  { cat: 'Amazon/Shopping', patterns: [/amazon/i, /amzn/i, /target/i, /walmart/i, /kohls/i, /best buy/i, /ikea/i, /homegoods/i, /ross/i, /tj maxx/i, /marshalls/i, /macys/i, /nordstrom/i, /city sports/i, /heath ceramics/i] },
+  { cat: 'Transport', patterns: [/uber(?!.*eats)/i, /lyft/i, /waymo/i, /bart/i, /clipper/i, /caltrain/i, /parking/i, /chevron/i, /shell/i, /\b76\b/i, /arco/i, /gas station/i] },
+  { cat: 'Healthcare', patterns: [/cvs/i, /walgreens/i, /pharmacy/i, /dental/i, /medical/i, /clinic/i, /hospital/i, /one medical/i, /kaiser/i, /sutter/i] },
+  { cat: 'Therapy', patterns: [/jennifer villena/i, /therapy/i, /therapist/i, /counseling/i] },
+  { cat: 'Entertainment', patterns: [/cinemark/i, /amc theat/i, /fandango/i, /steam/i, /steamgames/i, /playstation/i, /xbox/i, /nintendo/i, /tiktok/i, /concert/i, /ticketmaster/i, /eventbrite/i, /rasputin/i] },
+  { cat: 'Fitness', patterns: [/\bgym\b/i, /citysport/i, /equinox/i, /24 hour fitness/i, /planet fitness/i, /yoga/i, /pilates/i, /classpass/i] },
+  { cat: 'Travel', patterns: [/airbnb/i, /hotel/i, /united air/i, /delta air/i, /southwest air/i, /american airlines/i, /alaska air/i, /booking\.com/i, /expedia/i] },
+  { cat: 'Fees', patterns: [/returned payment/i, /maintenance fee/i, /overdraft/i, /late fee/i, /atm fee/i, /annual fee/i] },
+  { cat: 'Investments', patterns: [/m1 finance/i, /robinhood/i, /fidelity/i, /vanguard/i, /schwab/i, /buy nvda/i, /buy goog/i, /buy aapl/i, /sell nvda/i, /sell aapl/i, /sell mub/i, /sell bnd/i, /sell shy/i, /sell vb/i, /securities/i] },
+  { cat: 'Internal Transfer', patterns: [/zelle.*(ahsan|chishti|own|self|bofa|bank of america)/i, /transfer to sav/i, /transfer to check/i, /sofi.*(checking|savings).*transfer/i, /payment thank you/i, /credit card payment/i] },
+  { cat: 'P2P Payment', patterns: [/zelle/i, /venmo/i, /cashapp/i, /paypal(?!.*subscription)/i] },
+  { cat: 'Cash', patterns: [/\batm\b/i, /cash withdrawal/i] },
+  { cat: 'Loan Payment', patterns: [/edfinancial/i, /student loan/i, /great lakes/i, /mohela/i, /nelnet/i, /aidvantage/i] },
+  { cat: 'Family', patterns: [/family fund/i] },
+  { cat: 'Income', patterns: [/handshake/i, /payroll/i, /direct dep/i, /stryder/i, /invisible techno/i] }
+];
+
+const CATEGORY_OPTIONS = [
+  'Rent/Housing','Utilities','Groceries','Restaurants','Food Delivery','Subscriptions',
+  'Amazon/Shopping','Transport','Healthcare','Therapy','Entertainment','Fitness','Travel',
+  'Fees','Internal Transfer','P2P Payment','Cash','Loan Payment','Family','Income','Investments','Other'
+];
+
+// Categories that don't count as spending (saved money, not spent money)
+const NON_SPENDING_CATEGORIES = new Set(['Income','Internal Transfer','Investments','Loan Payment']);
+
+// Account name fragments to exclude from spending entirely (investment accounts).
+// These must be specific enough to not catch regular accounts. Internal M1 trades
+// (buy/sell inside brokerage) live in these accounts and would pollute the feed.
+const EXCLUDED_ACCOUNT_PATTERNS = [/m1 finance/i, /reserve/i];
+
+const DEFAULT_LOANS = [
+  { id: '1-01', name: 'Direct Loan - Subsidized', balance: 2664.02, originalBalance: 2664.02, rate: 5.05, type: 'Subsidized' },
+  { id: '1-02', name: 'Direct Loan - Subsidized', balance: 3337.33, originalBalance: 3337.33, rate: 2.75, type: 'Subsidized' },
+  { id: '1-03', name: 'Direct Loan - Subsidized', balance: 1823.18, originalBalance: 1823.18, rate: 3.73, type: 'Subsidized' },
+  { id: '1-04', name: 'Direct Loan - Unsubsidized', balance: 1896.24, originalBalance: 1896.24, rate: 3.73, type: 'Unsubsidized' }
+];
+
+const DEFAULT_GOAL = { name: 'Wedding', target: 20000, current: 0, emoji: '💍' };
+
+// Stable transaction key for overrides
+function txnKey(t) {
+  const d = typeof t.date === 'string' ? t.date.slice(0,10) : new Date(t.date).toISOString().slice(0,10);
+  const desc = (t.desc || '').slice(0, 40);
+  return `${d}|${t.amount}|${desc}`;
+}
+
+function categorizeFromDesc(desc) {
+  if (!desc) return { cat: 'Other', matched: null };
+  for (const rule of categoryRules) {
+    for (const pattern of rule.patterns) {
+      if (pattern.test(desc)) return { cat: rule.cat, matched: pattern.source };
+    }
+  }
+  return { cat: 'Other', matched: null };
+}
+
+// Normalize Tiller Category Hint to our category set
+function normalizeTillerHint(hint) {
+  if (!hint) return null;
+  const h = hint.toLowerCase().trim();
+  const map = {
+    'rent': 'Rent/Housing', 'housing': 'Rent/Housing', 'mortgage': 'Rent/Housing',
+    'utilities': 'Utilities', 'internet': 'Utilities', 'phone': 'Utilities', 'electric': 'Utilities',
+    'groceries': 'Groceries', 'food & drink': 'Restaurants', 'food and drink': 'Restaurants',
+    'restaurants': 'Restaurants', 'dining': 'Restaurants', 'coffee shops': 'Restaurants',
+    'food delivery': 'Food Delivery',
+    'subscriptions': 'Subscriptions', 'software': 'Subscriptions', 'streaming': 'Subscriptions',
+    'shopping': 'Amazon/Shopping', 'amazon': 'Amazon/Shopping', 'clothing': 'Amazon/Shopping',
+    'transport': 'Transport', 'transportation': 'Transport', 'gas': 'Transport', 'rideshare': 'Transport', 'parking': 'Transport',
+    'health': 'Healthcare', 'healthcare': 'Healthcare', 'pharmacy': 'Healthcare', 'medical': 'Healthcare',
+    'therapy': 'Therapy', 'mental health': 'Therapy',
+    'entertainment': 'Entertainment', 'gaming': 'Entertainment', 'movies': 'Entertainment',
+    'fitness': 'Fitness', 'gym': 'Fitness',
+    'travel': 'Travel', 'hotels': 'Travel', 'flights': 'Travel',
+    'fees': 'Fees', 'bank fees': 'Fees',
+    'transfer': 'Internal Transfer', 'transfers': 'Internal Transfer', 'credit card payment': 'Internal Transfer',
+    'venmo': 'P2P Payment', 'zelle': 'P2P Payment',
+    'cash': 'Cash', 'atm': 'Cash',
+    'loan': 'Loan Payment', 'student loan': 'Loan Payment', 'loans': 'Loan Payment',
+    'income': 'Income', 'paycheck': 'Income', 'salary': 'Income',
+    'investments': 'Investments', 'investment': 'Investments',
+  };
+  if (map[h]) return map[h];
+  for (const k of Object.keys(map)) { if (h.includes(k)) return map[k]; }
+  return null;
+}
+
+function parseAmount(s) {
+  if (!s) return 0;
+  s = String(s).replace(/[$,]/g, '').trim();
+  if (s.startsWith('(') && s.endsWith(')')) return -parseFloat(s.slice(1, -1));
+  return parseFloat(s) || 0;
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  // Try M/D/YYYY or MM/DD/YYYY
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]));
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+  // Try YYYY-MM-DD (Tiller's default)
+  if (str.includes('-')) {
+    const parts = str.split('-');
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+  // Last resort: let JS try
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ---- Google Identity Services loader ----
+let gsiLoadPromise = null;
+function loadGsi() {
+  if (gsiLoadPromise) return gsiLoadPromise;
+  gsiLoadPromise = new Promise((resolve, reject) => {
+    if (window.google && window.google.accounts) { resolve(); return; }
+    const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return gsiLoadPromise;
+}
+
+// Request an OAuth token. If silent=true, no popup — only succeeds if
+// the user has already granted access in this session.
+async function requestGoogleToken(silent = false) {
+  await loadGsi();
+  if (!window.google?.accounts?.oauth2) {
+    throw new Error('Google Identity Services failed to load');
+  }
+  if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.startsWith('YOUR_')) {
+    throw new Error('Google Client ID is not configured. Set GOOGLE_CLIENT_ID at the top of this file.');
+  }
+  return new Promise((resolve, reject) => {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_SCOPE,
+      prompt: silent ? 'none' : '',
+      callback: (resp) => {
+        if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        resolve(resp);
+      },
+      error_callback: (err) => reject(new Error(err.message || err.type || 'OAuth failed'))
+    });
+    try { client.requestAccessToken(); }
+    catch (e) { reject(e); }
+  });
+}
+
+// Fetch all rows from the Tiller sheet using the given token.
+async function fetchTillerSheet(accessToken) {
+  const range = encodeURIComponent(TILLER_TAB);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${TILLER_SHEET_ID}/values/${range}?majorDimension=ROWS`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Sheets API ${resp.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  const values = data.values || [];
+  if (values.length < 2) return [];
+  const headers = values[0];
+  return values.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = row[i] || ''; });
+    return obj;
+  });
+}
+
+// Shared transaction-parsing pipeline (used by both CSV upload and Google fetch).
+// Returns { txns, skippedNoDate, excludedAccounts, headers }.
+function parseRowsToTxns(rows, headers) {
+  const txns = [];
+  let skippedNoDate = 0;
+  let skippedExcludedAccount = 0;
+  const excludedAccounts = new Set();
+  for (const row of rows) {
+    const date = parseDate(row.Date || row.date);
+    if (!date) { skippedNoDate++; continue; }
+    const desc = row.Description || row['Full Description'] || row.description || '';
+    const account = row.Account || row.account || '';
+    if (EXCLUDED_ACCOUNT_PATTERNS.some(p => p.test(account))) {
+      skippedExcludedAccount++;
+      excludedAccounts.add(account);
+      continue;
+    }
+    const tillerHint = row['Category Hint'] || row.CategoryHint || row.Category || '';
+    const hintCat = normalizeTillerHint(tillerHint);
+    const regexCat = categorizeFromDesc(desc);
+    const finalCat = hintCat || regexCat.cat;
+    txns.push({
+      date: date.toISOString(),
+      desc,
+      amount: parseAmount(row.Amount || row.amount),
+      account,
+      category: finalCat,
+      tillerCategory: hintCat,
+      matched: regexCat.matched
+    });
+  }
+  return { txns, skippedNoDate, skippedExcludedAccount, excludedAccounts: Array.from(excludedAccounts), headers };
+}
+
+const fmt = (n) => '$' + Math.round(n).toLocaleString();
+const fmtDec = (n) => '$' + Number(n).toFixed(2);
+const fmtMonths = (m) => {
+  if (!isFinite(m)) return '∞';
+  if (m < 12) return `${Math.round(m)} mo`;
+  const y = Math.floor(m / 12);
+  const rem = Math.round(m % 12);
+  return rem === 0 ? `${y} yr` : `${y}y ${rem}m`;
+};
+
+function simulatePayoff(loans, monthlyMinimums, extraPayment, strategy = 'avalanche') {
+  const sim = loans.map(l => ({ ...l }));
+  const sorted = strategy === 'avalanche'
+    ? sim.slice().sort((a, b) => b.rate - a.rate)
+    : sim.slice().sort((a, b) => a.balance - b.balance);
+  let month = 0, totalInterest = 0;
+  const timeline = [{ month: 0, balance: Math.round(sim.reduce((s, l) => s + l.balance, 0)) }];
+  while (sim.some(l => l.balance > 0.01) && month < 600) {
+    let extra = extraPayment;
+    for (const loan of sim) {
+      if (loan.balance <= 0.01) continue;
+      const monthlyRate = loan.rate / 100 / 12;
+      const interest = loan.balance * monthlyRate;
+      const minPayment = Math.min(monthlyMinimums[loan.id] || 50, loan.balance + interest);
+      const principal = Math.max(minPayment - interest, 0);
+      loan.balance = Math.max(0, loan.balance - principal);
+      totalInterest += interest;
+    }
+    for (const loan of sorted) {
+      const liveLoan = sim.find(l => l.id === loan.id);
+      if (liveLoan && liveLoan.balance > 0.01) {
+        const applied = Math.min(extra, liveLoan.balance);
+        liveLoan.balance -= applied;
+        break;
+      }
+    }
+    month++;
+    const totalBalance = sim.reduce((s, l) => s + l.balance, 0);
+    timeline.push({ month, balance: Math.round(totalBalance) });
+    if (totalBalance < 0.01) break;
+  }
+  return { months: month, totalInterest, timeline };
+}
+
+const COLORS = ['#7F77DD', '#1D9E75', '#D85A30', '#D4537E', '#888780', '#378ADD', '#639922', '#BA7517', '#E24B4A', '#5DCAA5', '#F0997B', '#ED93B1'];
+
+function FinanceDashboard() {
+  const [rawTxns, setRawTxns] = useState([]);            // raw parsed txns (no category applied)
+  const [overrides, setOverrides] = useState({});        // { txnKey: category }
+  const [budgets, setBudgets] = useState({});
+  const [loans, setLoans] = useState(DEFAULT_LOANS);
+  const [goal, setGoal] = useState(DEFAULT_GOAL);
+  const [settings, setSettings] = useState({ standardPayment: 75, extraPayment: 200, strategy: 'avalanche' });
+  const [activeTab, setActiveTab] = useState('overview');
+  const [monthFilter, setMonthFilter] = useState('all');
+  const [drillCategory, setDrillCategory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploadStatus, setUploadStatus] = useState(null); // { type: 'error'|'success'|'info', message, details? }
+  const [googleToken, setGoogleToken] = useState(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const googleAutoFetchedRef = useRef(false);
+
+  // Load persisted state
+  useEffect(() => {
+    async function load() {
+      try { const r = await window.storage.get(STORAGE_KEY); if (r?.value) setRawTxns(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(BUDGET_KEY); if (r?.value) setBudgets(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(LOAN_KEY); if (r?.value) setLoans(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(SETTINGS_KEY); if (r?.value) setSettings(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(OVERRIDES_KEY); if (r?.value) setOverrides(JSON.parse(r.value)); } catch (e) {}
+      try { const r = await window.storage.get(GOAL_KEY); if (r?.value) setGoal(JSON.parse(r.value)); } catch (e) {}
+      setLoading(false);
+
+      // Restore cached Google token if still valid (sessionStorage survives tab, not browser)
+      try {
+        const raw = sessionStorage.getItem(GOOGLE_TOKEN_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.expiresAt && parsed.expiresAt > Date.now()) {
+            setGoogleToken(parsed);
+          } else {
+            sessionStorage.removeItem(GOOGLE_TOKEN_KEY);
+          }
+        }
+      } catch (e) {}
+    }
+    load();
+  }, []);
+
+  // Auto-fetch from Google on mount (if user previously opted in).
+  // Tries silent first (no popup); falls back to showing a connect button.
+  useEffect(() => {
+    if (loading) return;
+    if (googleAutoFetchedRef.current) return;
+    googleAutoFetchedRef.current = true;
+
+    const optedIn = localStorage.getItem(GOOGLE_AUTO_KEY) === '1';
+    if (!optedIn) return;
+    if (GOOGLE_CLIENT_ID.startsWith('YOUR_')) return; // not configured, skip silently
+
+    // If we have a valid token, fetch immediately. Otherwise try silent re-auth.
+    (async () => {
+      try {
+        let token = googleToken;
+        if (!token || !token.expiresAt || token.expiresAt <= Date.now()) {
+          setGoogleLoading(true);
+          const resp = await requestGoogleToken(true).catch(() => null);
+          if (!resp) { setGoogleLoading(false); return; } // silent failed; user will see Connect button
+          token = { accessToken: resp.access_token, expiresAt: Date.now() + (resp.expires_in - 60) * 1000 };
+          setGoogleToken(token);
+          sessionStorage.setItem(GOOGLE_TOKEN_KEY, JSON.stringify(token));
+        }
+        await performGoogleFetch(token.accessToken);
+      } catch (e) {
+        console.warn('Auto-fetch failed:', e);
+        setGoogleLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  // Apply categorization: Tiller Category Hint -> override -> regex fallback
+  const transactions = useMemo(() => {
+    return rawTxns.map(t => {
+      const key = txnKey(t);
+      if (overrides[key]) {
+        return { ...t, category: overrides[key], overridden: true };
+      }
+      // If raw has a tillerHint, use it
+      if (t.tillerCategory) return t;
+      // else, keep whatever was categorized at parse time
+      return t;
+    });
+  }, [rawTxns, overrides]);
+
+  const setOverride = async (key, cat) => {
+    const newOverrides = { ...overrides, [key]: cat };
+    setOverrides(newOverrides);
+    try { await window.storage.set(OVERRIDES_KEY, JSON.stringify(newOverrides)); } catch (e) {}
+  };
+
+  const clearOverride = async (key) => {
+    const newOverrides = { ...overrides };
+    delete newOverrides[key];
+    setOverrides(newOverrides);
+    try { await window.storage.set(OVERRIDES_KEY, JSON.stringify(newOverrides)); } catch (e) {}
+  };
+
+  // Shared "commit new txns to state + storage + status banner" logic,
+  // used by both CSV upload and Google fetch.
+  const commitTxns = async (rows, sourceLabel) => {
+    const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+    const { txns, skippedNoDate, skippedExcludedAccount, excludedAccounts } = parseRowsToTxns(rows, headers);
+
+    if (txns.length === 0) {
+      setUploadStatus({
+        type: 'error',
+        message: `No usable transactions from ${sourceLabel}`,
+        details: `Read ${rows.length} rows. Skipped ${skippedNoDate} with unreadable dates, ${skippedExcludedAccount} from excluded accounts. Detected columns: ${headers.join(', ')}`
+      });
+      return false;
+    }
+
+    setRawTxns(txns);
+    try { await window.storage.set(STORAGE_KEY, JSON.stringify(txns)); }
+    catch (err) { console.error('Storage save failed:', err); }
+
+    const detailParts = [];
+    if (skippedExcludedAccount > 0) detailParts.push(`excluded ${skippedExcludedAccount} from ${excludedAccounts.join(', ')}`);
+    if (skippedNoDate > 0) detailParts.push(`${skippedNoDate} rows had unreadable dates`);
+
+    setUploadStatus({
+      type: 'success',
+      message: `Loaded ${txns.length} transactions from ${sourceLabel}`,
+      details: detailParts.join(' · ') || null
+    });
+    setLastSync(new Date());
+    setTimeout(() => setUploadStatus(null), 5000);
+    return true;
+  };
+
+  const handleUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadStatus({ type: 'info', message: `Reading ${file.name}…` });
+    const reader = new FileReader();
+    reader.onerror = () => {
+      setUploadStatus({ type: 'error', message: 'Failed to read file', details: reader.error?.message });
+    };
+    reader.onload = async (evt) => {
+      try {
+        const text = evt.target.result;
+        if (!text || typeof text !== 'string') {
+          setUploadStatus({ type: 'error', message: 'File was empty or unreadable' });
+          return;
+        }
+        const result = Papa.parse(text, { header: true, skipEmptyLines: true });
+        if (result.errors && result.errors.length > 0) console.warn('CSV parse warnings:', result.errors);
+        if (!result.data || result.data.length === 0) {
+          setUploadStatus({ type: 'error', message: 'No rows found in CSV', details: `Parse errors: ${result.errors?.map(err => err.message).join('; ') || 'none'}` });
+          return;
+        }
+        await commitTxns(result.data, file.name);
+      } catch (err) {
+        console.error('Upload error:', err);
+        setUploadStatus({ type: 'error', message: 'Upload failed', details: err.message });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // reset so same file re-triggers onChange
+  };
+
+  // Fetch from Google using a valid token. Called by both auto-fetch and manual refresh.
+  const performGoogleFetch = async (accessToken) => {
+    setGoogleLoading(true);
+    setUploadStatus({ type: 'info', message: 'Fetching from Tiller sheet…' });
+    try {
+      const rows = await fetchTillerSheet(accessToken);
+      if (rows.length === 0) {
+        setUploadStatus({ type: 'error', message: 'Tiller sheet was empty', details: 'Got no rows back. Check the sheet ID and tab name.' });
+        return;
+      }
+      await commitTxns(rows, 'Google Sheets');
+    } catch (err) {
+      console.error('Google fetch failed:', err);
+      // 401 means token is stale — clear it so UI prompts re-auth
+      if (String(err.message).includes('401')) {
+        setGoogleToken(null);
+        sessionStorage.removeItem(GOOGLE_TOKEN_KEY);
+      }
+      setUploadStatus({ type: 'error', message: 'Failed to fetch from Tiller', details: err.message });
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const connectGoogle = async () => {
+    try {
+      setGoogleLoading(true);
+      setUploadStatus({ type: 'info', message: 'Connecting to Google…' });
+      const resp = await requestGoogleToken(false);
+      const token = { accessToken: resp.access_token, expiresAt: Date.now() + (resp.expires_in - 60) * 1000 };
+      setGoogleToken(token);
+      sessionStorage.setItem(GOOGLE_TOKEN_KEY, JSON.stringify(token));
+      localStorage.setItem(GOOGLE_AUTO_KEY, '1'); // opt in to auto-fetch next time
+      await performGoogleFetch(token.accessToken);
+    } catch (err) {
+      console.error('Google connect failed:', err);
+      setUploadStatus({ type: 'error', message: 'Google sign-in failed', details: err.message });
+      setGoogleLoading(false);
+    }
+  };
+
+  const refreshGoogle = async () => {
+    if (!googleToken || googleToken.expiresAt <= Date.now()) {
+      return connectGoogle();
+    }
+    await performGoogleFetch(googleToken.accessToken);
+  };
+
+  const disconnectGoogle = () => {
+    setGoogleToken(null);
+    sessionStorage.removeItem(GOOGLE_TOKEN_KEY);
+    localStorage.removeItem(GOOGLE_AUTO_KEY);
+    setUploadStatus({ type: 'info', message: 'Disconnected from Google. Auto-fetch disabled.' });
+    setTimeout(() => setUploadStatus(null), 3000);
+  };
+
+  const updateLoan = async (id, field, value) => {
+    const updated = loans.map(l => l.id === id ? { ...l, [field]: parseFloat(value) || 0 } : l);
+    setLoans(updated);
+    try { await window.storage.set(LOAN_KEY, JSON.stringify(updated)); } catch (e) {}
+  };
+
+  const updateSetting = async (field, value) => {
+    const updated = { ...settings, [field]: value };
+    setSettings(updated);
+    try { await window.storage.set(SETTINGS_KEY, JSON.stringify(updated)); } catch (e) {}
+  };
+
+  const updateBudget = async (cat, val) => {
+    const newBudgets = { ...budgets };
+    if (val > 0) newBudgets[cat] = val;
+    else delete newBudgets[cat];
+    setBudgets(newBudgets);
+    try { await window.storage.set(BUDGET_KEY, JSON.stringify(newBudgets)); } catch (e) {}
+  };
+
+  const updateGoal = async (field, value) => {
+    const updated = { ...goal, [field]: value };
+    setGoal(updated);
+    try { await window.storage.set(GOAL_KEY, JSON.stringify(updated)); } catch (e) {}
+  };
+
+  const months = useMemo(() => {
+    const set = new Set();
+    transactions.forEach(t => {
+      const d = new Date(t.date);
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  const filteredTxns = useMemo(() => {
+    if (monthFilter === 'all') return transactions;
+    return transactions.filter(t => {
+      const d = new Date(t.date);
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return m === monthFilter;
+    });
+  }, [transactions, monthFilter]);
+
+  // Spending = negative amounts, not in non-spending categories
+  const isSpendingTxn = (t) => t.amount < 0 && !NON_SPENDING_CATEGORIES.has(t.category);
+
+  const spendingByCategory = useMemo(() => {
+    const totals = {};
+    for (const t of filteredTxns) {
+      if (!isSpendingTxn(t)) continue;
+      totals[t.category] = (totals[t.category] || 0) + Math.abs(t.amount);
+    }
+    return totals;
+  }, [filteredTxns]);
+
+  const monthlySpending = useMemo(() => {
+    const byMonth = {};
+    for (const t of transactions) {
+      if (!isSpendingTxn(t)) continue;
+      const d = new Date(t.date);
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      byMonth[m] = (byMonth[m] || 0) + Math.abs(t.amount);
+    }
+    return byMonth;
+  }, [transactions]);
+
+  const monthlyIncome = useMemo(() => {
+    const byMonth = {};
+    for (const t of transactions) {
+      if (t.category !== 'Income' || t.amount <= 0) continue;
+      const d = new Date(t.date);
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      byMonth[m] = (byMonth[m] || 0) + t.amount;
+    }
+    return byMonth;
+  }, [transactions]);
+
+  // Money moved into brokerage (Investments) = savings, not spending
+  const monthlyInvested = useMemo(() => {
+    const byMonth = {};
+    for (const t of transactions) {
+      if (t.category !== 'Investments') continue;
+      if (t.amount >= 0) continue; // only outgoing (money leaving checking into brokerage)
+      const d = new Date(t.date);
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      byMonth[m] = (byMonth[m] || 0) + Math.abs(t.amount);
+    }
+    return byMonth;
+  }, [transactions]);
+
+  const totalInvested = Object.values(monthlyInvested).reduce((a, b) => a + b, 0);
+  const avgInvested = Object.keys(monthlyInvested).length > 0 ? totalInvested / Object.keys(monthlyInvested).length : 0;
+
+  // Recent transactions (last 14 days, sorted by amount desc), with overrides applied
+  const recentSpending = useMemo(() => {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    return transactions
+      .filter(t => isSpendingTxn(t) && new Date(t.date).getTime() >= cutoff)
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  }, [transactions]);
+
+  // Subscription detection: stricter grouping + zombie detection
+  const { activeSubs, zombieSubs } = useMemo(() => {
+    const groups = {};
+    for (const t of transactions) {
+      if (!isSpendingTxn(t)) continue;
+      const norm = (t.desc || '').toLowerCase().replace(/[0-9*#x\-,.\/]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 3).join(' ');
+      if (!norm) continue;
+      if (!groups[norm]) groups[norm] = [];
+      groups[norm].push(t);
+    }
+    const active = [];
+    const zombies = [];
+    const now = Date.now();
+    for (const [name, txns] of Object.entries(groups)) {
+      if (txns.length < 2) continue;
+      const amounts = txns.map(t => Math.abs(t.amount));
+      const avg = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+      // Allow 25% variance for flagging (was 15%, too strict)
+      const consistent = amounts.every(a => Math.abs(a - avg) / avg < 0.25);
+      if (!consistent) continue;
+
+      const dates = txns.map(t => new Date(t.date).getTime()).sort((a, b) => a - b);
+      const gaps = [];
+      for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24));
+      const avgGap = gaps.length ? gaps.reduce((a,b) => a+b, 0) / gaps.length : 0;
+      const lastDate = dates[dates.length - 1];
+      const daysSinceLast = (now - lastDate) / (1000 * 60 * 60 * 24);
+
+      // Zombie: had a big gap (>60d) somewhere, then a recent charge
+      const hasBigGap = gaps.some(g => g > 60);
+      const recentCharge = daysSinceLast < 45;
+
+      const entry = {
+        name: txns[0].desc,
+        monthly: avgGap > 0 && avgGap < 60 ? avg : avg,
+        perCharge: avg,
+        count: txns.length,
+        category: txns[0].category,
+        lastDate: new Date(lastDate),
+        avgGap,
+        daysSinceLast
+      };
+
+      if (hasBigGap && recentCharge) {
+        zombies.push(entry);
+      } else if (avgGap >= 20 && avgGap <= 45 && txns.length >= 3) {
+        active.push(entry);
+      } else if (txns.length >= 2 && daysSinceLast < 60) {
+        // Possible subscription (only 2 charges so far, or irregular)
+        active.push({ ...entry, uncertain: true });
+      }
+    }
+    return {
+      activeSubs: active.sort((a, b) => b.monthly - a.monthly),
+      zombieSubs: zombies.sort((a, b) => b.monthly - a.monthly)
+    };
+  }, [transactions]);
+
+  const monthsInData = monthFilter === 'all' ? Math.max(months.length, 1) : 1;
+  const totalSpending = Object.values(spendingByCategory).reduce((a, b) => a + b, 0);
+  const avgMonthly = totalSpending / monthsInData;
+  const totalIncome = Object.values(monthlyIncome).reduce((a, b) => a + b, 0);
+  const avgIncome = Object.keys(monthlyIncome).length > 0 ? totalIncome / Object.keys(monthlyIncome).length : 0;
+  const sortedCats = Object.entries(spendingByCategory).sort((a, b) => b[1] - a[1]);
+  const allMonths = Array.from(new Set([...Object.keys(monthlySpending), ...Object.keys(monthlyIncome)])).sort();
+
+  const totalLoanBalance = loans.reduce((s, l) => s + l.balance, 0);
+  const totalOriginal = loans.reduce((s, l) => s + l.originalBalance, 0);
+  const weightedRate = totalLoanBalance > 0 ? loans.reduce((s, l) => s + l.balance * l.rate, 0) / totalLoanBalance : 0;
+  const minimumsByLoan = {};
+  loans.forEach(l => {
+    minimumsByLoan[l.id] = totalLoanBalance > 0 ? (l.balance / totalLoanBalance) * settings.standardPayment : 0;
+  });
+  const minOnlyScenario = useMemo(() => simulatePayoff(loans, minimumsByLoan, 0, settings.strategy), [loans, settings.standardPayment, settings.strategy]);
+  const extraScenario = useMemo(() => simulatePayoff(loans, minimumsByLoan, settings.extraPayment, settings.strategy), [loans, settings.standardPayment, settings.extraPayment, settings.strategy]);
+
+  // Goal projections
+  const monthlySurplus = avgIncome - avgMonthly;
+  const goalRemaining = Math.max(0, goal.target - goal.current);
+  const monthsToGoal = monthlySurplus > 0 ? goalRemaining / monthlySurplus : Infinity;
+  const goalPct = goal.target > 0 ? (goal.current / goal.target) * 100 : 0;
+
+  if (loading) return <div className="min-h-screen bg-stone-50 flex items-center justify-center"><div className="text-stone-400">Loading…</div></div>;
+
+  if (rawTxns.length === 0) {
+    return (
+      <div className="min-h-screen bg-stone-50">
+        <div className="max-w-2xl mx-auto p-12">
+          <div className="mb-12">
+            <div className="text-xs uppercase tracking-widest text-stone-500 mb-2">Personal finance</div>
+            <h1 className="text-4xl font-medium text-stone-900 mb-3" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>Money Map</h1>
+            <p className="text-stone-600">A clear-eyed look at where your money goes, what you owe, and how to fix it.</p>
+          </div>
+          {uploadStatus && (
+            <div className={`mb-4 p-4 rounded-xl border text-sm ${
+              uploadStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-900' :
+              uploadStatus.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' :
+              'bg-blue-50 border-blue-200 text-blue-900'
+            }`}>
+              <div className="font-medium">{uploadStatus.message}</div>
+              {uploadStatus.details && <div className="text-xs mt-1 opacity-80">{uploadStatus.details}</div>}
+            </div>
+          )}
+          <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center">
+            <Cloud className="w-8 h-8 text-stone-400 mx-auto mb-4" />
+            <h2 className="text-lg font-medium mb-2">Connect to your Tiller sheet</h2>
+            <p className="text-sm text-stone-500 mb-6">Sign in with Google once. Data is fetched directly from your Drive — nothing is stored anywhere except your browser.</p>
+            <button
+              onClick={connectGoogle}
+              disabled={googleLoading || GOOGLE_CLIENT_ID.startsWith('YOUR_')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-stone-900 text-white rounded-lg hover:bg-stone-800 text-sm font-medium disabled:bg-stone-300 disabled:cursor-not-allowed"
+            >
+              <Cloud className="w-4 h-4" />
+              {googleLoading ? 'Connecting…' : 'Connect Google'}
+            </button>
+            {GOOGLE_CLIENT_ID.startsWith('YOUR_') && (
+              <div className="mt-3 text-xs text-amber-700">
+                Set <code className="bg-amber-50 px-1 rounded">GOOGLE_CLIENT_ID</code> at the top of the source file first.
+              </div>
+            )}
+
+            <div className="flex items-center gap-4 my-6">
+              <div className="flex-1 h-px bg-stone-200" />
+              <span className="text-xs uppercase tracking-wider text-stone-400">or</span>
+              <div className="flex-1 h-px bg-stone-200" />
+            </div>
+
+            <label className="inline-flex items-center gap-2 px-5 py-2.5 border border-stone-300 text-stone-700 rounded-lg cursor-pointer hover:bg-stone-50 text-sm font-medium">
+              <Upload className="w-4 h-4" />
+              Upload CSV instead
+              <input type="file" accept=".csv" onChange={handleUpload} className="hidden" />
+            </label>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'goal', label: 'Wedding Goal' },
+    { id: 'spending', label: 'Spending' },
+    { id: 'subscriptions', label: 'Subscriptions' },
+    { id: 'budgets', label: 'Budgets' },
+    { id: 'trends', label: 'Trends' },
+    { id: 'loans', label: 'Loans' },
+    { id: 'ask', label: 'Ask Claude' }
+  ];
+
+  return (
+    <div className="min-h-screen bg-stone-50 text-stone-900">
+      <header className="border-b border-stone-200 bg-white sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-stone-400">Personal finance</div>
+            <h1 className="text-xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>Money Map</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="px-3 py-1.5 text-sm border border-stone-200 rounded-md bg-white">
+              <option value="all">All months</option>
+              {months.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            {googleToken ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={refreshGoogle}
+                  disabled={googleLoading}
+                  title={lastSync ? `Last synced ${lastSync.toLocaleTimeString()}` : 'Sync from Google Sheets'}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-emerald-200 bg-emerald-50 text-emerald-800 rounded-md hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${googleLoading ? 'animate-spin' : ''}`} />
+                  {googleLoading ? 'Syncing…' : 'Sync'}
+                </button>
+                <button
+                  onClick={disconnectGoogle}
+                  title="Disconnect Google"
+                  className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded"
+                >
+                  <CloudOff className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={connectGoogle}
+                disabled={googleLoading || GOOGLE_CLIENT_ID.startsWith('YOUR_')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-stone-200 rounded-md hover:bg-stone-50 disabled:opacity-50"
+              >
+                <Cloud className="w-3 h-3" />
+                {googleLoading ? 'Connecting…' : 'Connect Google'}
+              </button>
+            )}
+
+            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-stone-200 rounded-md hover:bg-stone-50 cursor-pointer">
+              <Upload className="w-3 h-3" />
+              CSV
+              <input type="file" accept=".csv" onChange={handleUpload} className="hidden" />
+            </label>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex gap-6 -mb-px overflow-x-auto">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); setDrillCategory(null); }}
+                className={`px-1 py-3 text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-stone-900 text-stone-900 font-medium' : 'border-transparent text-stone-500 hover:text-stone-700'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        {uploadStatus && (
+          <div className={`mb-6 p-4 rounded-xl border text-sm flex items-start justify-between gap-3 ${
+            uploadStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-900' :
+            uploadStatus.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' :
+            'bg-blue-50 border-blue-200 text-blue-900'
+          }`}>
+            <div>
+              <div className="font-medium">{uploadStatus.message}</div>
+              {uploadStatus.details && <div className="text-xs mt-1 opacity-80">{uploadStatus.details}</div>}
+            </div>
+            <button onClick={() => setUploadStatus(null)} className="p-1 hover:bg-black/5 rounded"><X className="w-4 h-4" /></button>
+          </div>
+        )}
+
+        {drillCategory && (
+          <CategoryDrillDown
+            category={drillCategory}
+            txns={filteredTxns.filter(t => t.category === drillCategory)}
+            onClose={() => setDrillCategory(null)}
+            onOverride={setOverride}
+            onClearOverride={clearOverride}
+          />
+        )}
+
+        {activeTab === 'overview' && (
+          <div className="space-y-8">
+            {/* Hero stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <HeroStat label="Take-home" value={fmt(avgIncome)} sublabel="per month" accent="green" icon={<TrendingUp className="w-4 h-4" />} />
+              <HeroStat label="Spending" value={fmt(avgMonthly)} sublabel="per month" accent="orange" icon={<TrendingDown className="w-4 h-4" />} />
+              <HeroStat label="Surplus" value={fmt(monthlySurplus)} sublabel={`${avgIncome > 0 ? Math.round(monthlySurplus / avgIncome * 100) : 0}% saved`} accent={monthlySurplus > 0 ? 'green' : 'red'} icon={<DollarSign className="w-4 h-4" />} />
+              <HeroStat label={goal.name} value={fmt(goal.current)} sublabel={`of ${fmt(goal.target)} · ${Math.round(goalPct)}%`} accent="rose" icon={<Heart className="w-4 h-4" />} />
+            </div>
+
+            {/* Recent transactions: the thing that actually matters */}
+            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200">
+                <div>
+                  <h2 className="text-base font-medium">What you spent in the last 14 days</h2>
+                  <div className="text-xs text-stone-500 mt-0.5">Biggest first. Tap a category tag to recategorize. Zero aggregation, no hiding.</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>
+                    {fmt(recentSpending.reduce((s, t) => s + Math.abs(t.amount), 0))}
+                  </div>
+                  <div className="text-xs text-stone-500">{recentSpending.length} txns</div>
+                </div>
+              </div>
+              {recentSpending.length === 0 ? (
+                <div className="p-8 text-center text-sm text-stone-500">No spending in the last 14 days.</div>
+              ) : (
+                <div className="max-h-[420px] overflow-y-auto">
+                  {recentSpending.slice(0, 40).map((t, i) => (
+                    <RecentTxnRow key={txnKey(t) + i} txn={t} onOverride={setOverride} isLast={i === Math.min(recentSpending.length, 40) - 1} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Where money went + Wedding pace */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-white rounded-2xl border border-stone-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-medium">Where your money went</h2>
+                  <button onClick={() => setActiveTab('spending')} className="text-xs text-stone-500 hover:text-stone-900 flex items-center gap-1">
+                    See all <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+                <div style={{ height: 280 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={sortedCats.slice(0, 8).map(([cat, amt], i) => ({ cat, amt: Math.round(amt / monthsInData), fill: COLORS[i % COLORS.length] }))} layout="vertical" margin={{ left: 90, right: 20 }}>
+                      <XAxis type="number" tickFormatter={v => '$' + (v >= 1000 ? (v/1000).toFixed(1) + 'k' : v)} tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="cat" width={110} tick={{ fontSize: 12, fill: '#44403c' }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(v) => fmt(v) + '/mo'} contentStyle={{ background: 'white', border: '1px solid #e7e5e4', borderRadius: 8, fontSize: 12 }} />
+                      <Bar dataKey="amt" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-stone-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-medium flex items-center gap-1.5">{goal.emoji} {goal.name}</h2>
+                  <button onClick={() => setActiveTab('goal')} className="text-xs text-stone-500 hover:text-stone-900 flex items-center gap-1">
+                    Manage <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="mb-4">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="text-3xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmt(goal.current)}</span>
+                    <span className="text-xs text-stone-500">of {fmt(goal.target)}</span>
+                  </div>
+                  <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-rose-500 rounded-full transition-all" style={{ width: `${Math.min(100, goalPct)}%` }} />
+                  </div>
+                  <div className="text-xs text-stone-500 mt-1">{Math.round(goalPct)}% saved</div>
+                </div>
+                <div className="space-y-2 pt-4 border-t border-stone-100 text-sm">
+                  <div className="flex justify-between"><span className="text-stone-500">At current pace</span><span className="font-medium">{fmtMonths(monthsToGoal)}</span></div>
+                  <div className="flex justify-between"><span className="text-stone-500">Monthly surplus</span><span className={`font-medium ${monthlySurplus > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmt(monthlySurplus)}</span></div>
+                  <div className="flex justify-between"><span className="text-stone-500">Investing/mo</span><span className="font-medium text-blue-700">{fmt(avgInvested)}</span></div>
+                  <div className="flex justify-between"><span className="text-stone-500">Need to save</span><span className="font-medium">{fmt(goalRemaining)}</span></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Zombie subscriptions alert */}
+            {zombieSubs.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle className="w-4 h-4 text-red-700" />
+                  <h3 className="text-sm font-medium text-red-900">Zombie subscriptions — cancelled, then came back</h3>
+                </div>
+                <div className="space-y-2">
+                  {zombieSubs.slice(0, 5).map((s, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="text-red-900">{s.name}</span>
+                      <span className="text-red-700 font-medium">{fmtDec(s.perCharge)} · last {Math.round(s.daysSinceLast)}d ago</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'goal' && (
+          <GoalTab goal={goal} updateGoal={updateGoal} monthlySurplus={monthlySurplus} avgIncome={avgIncome} avgMonthly={avgMonthly} sortedCats={sortedCats} monthsInData={monthsInData} />
+        )}
+
+        {activeTab === 'spending' && (
+          <div className="space-y-4">
+            <div className="flex items-baseline justify-between mb-2">
+              <div>
+                <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Spending</div>
+                <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmt(avgMonthly)} <span className="text-sm text-stone-500 font-sans">per month avg</span></h2>
+              </div>
+              <div className="text-xs text-stone-500 hidden md:block">Click any category for transactions</div>
+            </div>
+            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              {sortedCats.map(([cat, amt], i) => {
+                const pct = (amt / totalSpending * 100).toFixed(1);
+                const monthly = amt / monthsInData;
+                return (
+                  <button key={cat} onClick={() => setDrillCategory(cat)} className={`w-full flex items-center justify-between px-5 py-4 hover:bg-stone-50 transition-colors text-left ${i < sortedCats.length - 1 ? 'border-b border-stone-100' : ''}`}>
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className="w-1 h-10 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">{cat}</div>
+                        <div className="text-xs text-stone-500">{pct}% · {fmt(monthly)}/mo</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-medium">{fmt(amt)}</div>
+                      <ChevronRight className="w-4 h-4 text-stone-300" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'subscriptions' && (
+          <div className="space-y-6">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Recurring charges</div>
+              <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>
+                {fmt(activeSubs.reduce((s, r) => s + r.monthly, 0))} <span className="text-sm text-stone-500 font-sans">per month · {fmt(activeSubs.reduce((s, r) => s + r.monthly, 0) * 12)} per year</span>
+              </h2>
+            </div>
+
+            {zombieSubs.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 bg-red-100 border-b border-red-200">
+                  <div className="text-xs uppercase tracking-wider text-red-900 font-medium">Zombies · cancelled but charged again</div>
+                </div>
+                {zombieSubs.map((s, i) => (
+                  <div key={i} className={`flex items-center justify-between px-5 py-3 ${i < zombieSubs.length - 1 ? 'border-b border-red-200' : ''}`}>
+                    <div className="flex-1 min-w-0 mr-4">
+                      <div className="text-sm font-medium text-red-900 truncate">{s.name}</div>
+                      <div className="text-xs text-red-700 mt-0.5">{s.count} charges · last {Math.round(s.daysSinceLast)}d ago · gap of {Math.round(Math.max(...[s.avgGap]))}d somewhere</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-medium text-red-900">{fmtDec(s.perCharge)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+              These charges hit your accounts more than once with consistent amounts. Items flagged "uncertain" have only 2 charges — verify before cancelling.
+            </div>
+            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              {activeSubs.length === 0 ? (
+                <div className="p-12 text-center text-stone-500">No recurring charges detected.</div>
+              ) : activeSubs.map((r, i) => (
+                <div key={i} className={`flex items-center justify-between px-5 py-4 ${i < activeSubs.length - 1 ? 'border-b border-stone-100' : ''}`}>
+                  <div className="flex-1 min-w-0 mr-4">
+                    <div className="text-sm font-medium truncate flex items-center gap-2">
+                      {r.name}
+                      {r.uncertain && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">uncertain</span>}
+                    </div>
+                    <div className="text-xs text-stone-500 mt-0.5">{r.category} · {r.count} charges · last seen {new Date(r.lastDate).toLocaleDateString()}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium">{fmtDec(r.monthly)}<span className="text-stone-400">/mo</span></div>
+                    <div className="text-xs text-stone-500">{fmt(r.monthly * 12)}/yr</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'loans' && (
+          <LoansTab loans={loans} updateLoan={updateLoan} settings={settings} updateSetting={updateSetting} minOnlyScenario={minOnlyScenario} extraScenario={extraScenario} totalLoanBalance={totalLoanBalance} totalOriginal={totalOriginal} weightedRate={weightedRate} avgIncome={avgIncome} avgMonthly={avgMonthly} />
+        )}
+
+        {activeTab === 'budgets' && (
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Budget targets</div>
+              <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>Set monthly limits</h2>
+              <p className="text-sm text-stone-600 mt-1">Saved across sessions. Bars go red if you're over.</p>
+            </div>
+            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              {sortedCats.map(([cat, amt], i) => {
+                const actualMonthly = amt / monthsInData;
+                const budget = budgets[cat] || 0;
+                const overBudget = budget > 0 && actualMonthly > budget;
+                const pctOver = budget > 0 ? Math.round((actualMonthly / budget) * 100) : 0;
+                return (
+                  <div key={cat} className={`px-5 py-4 ${i < sortedCats.length - 1 ? 'border-b border-stone-100' : ''}`}>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">{cat}</div>
+                        <div className="text-xs text-stone-500 mt-0.5">{fmt(actualMonthly)}/mo actual{budget > 0 ? ` · ${pctOver}% of budget` : ''}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-stone-400">$</span>
+                        <input type="number" defaultValue={budget || ''} placeholder="0" onBlur={(e) => updateBudget(cat, parseFloat(e.target.value) || 0)} className="w-20 h-8 px-2 text-sm text-right border border-stone-200 rounded-md" />
+                        <span className="text-sm text-stone-400">/mo</span>
+                      </div>
+                    </div>
+                    {budget > 0 && (
+                      <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${overBudget ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(pctOver, 100)}%` }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'trends' && (
+          <div className="space-y-6">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Trends</div>
+              <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>Income vs. spending over time</h2>
+            </div>
+            <div className="bg-white rounded-2xl border border-stone-200 p-6" style={{ height: 360 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={allMonths.map(m => ({ month: m, Income: Math.round(monthlyIncome[m] || 0), Spending: Math.round(monthlySpending[m] || 0) }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f4" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={v => '$' + (v >= 1000 ? (v/1000).toFixed(1) + 'k' : v)} tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(v) => fmt(v)} contentStyle={{ background: 'white', border: '1px solid #e7e5e4', borderRadius: 8, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="Income" stroke="#1D9E75" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="Spending" stroke="#D85A30" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+              {allMonths.slice().reverse().map((m, i) => {
+                const inc = monthlyIncome[m] || 0;
+                const spend = monthlySpending[m] || 0;
+                const surplus = inc - spend;
+                return (
+                  <div key={m} className={`grid grid-cols-4 gap-3 px-5 py-4 items-center ${i < allMonths.length - 1 ? 'border-b border-stone-100' : ''}`}>
+                    <div className="text-sm font-medium">{m}</div>
+                    <div className="text-xs text-stone-500">In: <span className="text-stone-900 font-medium">{fmt(inc)}</span></div>
+                    <div className="text-xs text-stone-500">Out: <span className="text-stone-900 font-medium">{fmt(spend)}</span></div>
+                    <div className={`text-sm font-medium text-right ${surplus >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {surplus >= 0 ? '+' : ''}{fmt(surplus)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'ask' && (
+          <AskClaudeTab
+            transactions={transactions}
+            spendingByCategory={spendingByCategory}
+            monthlySpending={monthlySpending}
+            monthlyIncome={monthlyIncome}
+            goal={goal}
+            avgIncome={avgIncome}
+            avgMonthly={avgMonthly}
+            monthsToGoal={monthsToGoal}
+            activeSubs={activeSubs}
+            zombieSubs={zombieSubs}
+            recentSpending={recentSpending}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ---- RecentTxnRow: inline recategorize ----
+function RecentTxnRow({ txn, onOverride, isLast }) {
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState(txn.category);
+  const d = new Date(txn.date);
+  const age = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+  const ageStr = age === 0 ? 'today' : age === 1 ? 'yesterday' : `${age}d ago`;
+
+  const save = () => {
+    if (selected !== txn.category) onOverride(txnKey(txn), selected);
+    setEditing(false);
+  };
+
+  return (
+    <div className={`flex items-center gap-3 px-6 py-3 ${!isLast ? 'border-b border-stone-100' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm truncate">{txn.desc}</div>
+        <div className="text-xs text-stone-500 mt-0.5 flex items-center gap-2">
+          <span>{ageStr}</span>
+          <span>·</span>
+          <span className="truncate">{txn.account}</span>
+          {txn.overridden && <span className="text-[10px] bg-blue-100 text-blue-800 px-1 rounded">edited</span>}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        {editing ? (
+          <>
+            <select value={selected} onChange={e => setSelected(e.target.value)} className="text-xs border border-stone-300 rounded px-2 py-1 bg-white">
+              {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button onClick={save} className="p-1 text-emerald-700 hover:bg-emerald-50 rounded"><Check className="w-3.5 h-3.5" /></button>
+            <button onClick={() => { setEditing(false); setSelected(txn.category); }} className="p-1 text-stone-500 hover:bg-stone-100 rounded"><X className="w-3.5 h-3.5" /></button>
+          </>
+        ) : (
+          <button onClick={() => setEditing(true)} className="text-[11px] bg-stone-100 hover:bg-stone-200 text-stone-700 px-2 py-1 rounded flex items-center gap-1">
+            {txn.category}
+            <Edit2 className="w-2.5 h-2.5" />
+          </button>
+        )}
+      </div>
+      <div className="text-sm font-medium text-stone-900 w-20 text-right tabular-nums">
+        -{fmt(Math.abs(txn.amount))}
+      </div>
+    </div>
+  );
+}
+
+function HeroStat({ label, value, sublabel, accent, icon }) {
+  const accentColors = {
+    green: 'text-emerald-600 bg-emerald-50',
+    orange: 'text-orange-600 bg-orange-50',
+    red: 'text-red-600 bg-red-50',
+    amber: 'text-amber-700 bg-amber-50',
+    rose: 'text-rose-700 bg-rose-50'
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-stone-200 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wider text-stone-500">{label}</div>
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${accentColors[accent]}`}>{icon}</div>
+      </div>
+      <div className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{value}</div>
+      <div className="text-xs text-stone-500 mt-1">{sublabel}</div>
+    </div>
+  );
+}
+
+// ---- CategoryDrillDown with inline override ----
+function CategoryDrillDown({ category, txns, onClose, onOverride, onClearOverride }) {
+  const sorted = txns.slice().sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const total = txns.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const matchedRules = Array.from(new Set(txns.map(t => t.matched).filter(Boolean)));
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState('');
+
+  const startEdit = (t) => {
+    setEditingKey(txnKey(t));
+    setEditValue(t.category);
+  };
+
+  const save = (t) => {
+    onOverride(txnKey(t), editValue);
+    setEditingKey(null);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between p-6 border-b border-stone-200">
+          <div>
+            <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Category</div>
+            <h3 className="text-xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{category}</h3>
+            <div className="text-sm text-stone-500 mt-1">{txns.length} transactions · {fmt(total)} total</div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+        {matchedRules.length > 0 && (
+          <div className="px-6 py-3 bg-stone-50 border-b border-stone-200">
+            <div className="text-xs text-stone-500 mb-1.5 uppercase tracking-wider">Matched by patterns</div>
+            <div className="flex flex-wrap gap-1.5">
+              {matchedRules.map((r, i) => (
+                <code key={i} className="text-xs bg-white px-2 py-1 rounded border border-stone-200 text-stone-700">/{r}/i</code>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="overflow-y-auto flex-1">
+          {sorted.map((t, i) => {
+            const key = txnKey(t);
+            const isEditing = editingKey === key;
+            return (
+              <div key={i} className={`px-6 py-3 flex items-center gap-3 ${i < sorted.length - 1 ? 'border-b border-stone-100' : ''}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm truncate">{t.desc}</div>
+                  <div className="text-xs text-stone-500 mt-0.5 flex items-center gap-2">
+                    <span>{new Date(t.date).toLocaleDateString()}</span>
+                    <span>·</span>
+                    <span className="truncate">{t.account}</span>
+                    {t.overridden && (
+                      <button onClick={() => onClearOverride(key)} className="text-[10px] bg-blue-100 text-blue-800 px-1 rounded hover:bg-blue-200">
+                        edited · reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <select value={editValue} onChange={e => setEditValue(e.target.value)} className="text-xs border border-stone-300 rounded px-2 py-1 bg-white">
+                        {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <button onClick={() => save(t)} className="p-1 text-emerald-700 hover:bg-emerald-50 rounded"><Check className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => setEditingKey(null)} className="p-1 text-stone-500 hover:bg-stone-100 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : (
+                    <button onClick={() => startEdit(t)} className="text-[11px] text-stone-500 hover:text-stone-900 flex items-center gap-1">
+                      <Edit2 className="w-3 h-3" /> recategorize
+                    </button>
+                  )}
+                </div>
+                <div className={`text-sm font-medium w-20 text-right tabular-nums ${t.amount < 0 ? 'text-stone-900' : 'text-emerald-700'}`}>
+                  {t.amount < 0 ? '-' : '+'}{fmt(Math.abs(t.amount))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- GoalTab ----
+function GoalTab({ goal, updateGoal, monthlySurplus, avgIncome, avgMonthly, sortedCats, monthsInData }) {
+  const remaining = Math.max(0, goal.target - goal.current);
+  const monthsAtPace = monthlySurplus > 0 ? remaining / monthlySurplus : Infinity;
+  const pct = goal.target > 0 ? (goal.current / goal.target) * 100 : 0;
+
+  // Scenario: cut top N discretionary categories by 50%
+  const discretionary = ['Restaurants','Food Delivery','Amazon/Shopping','Entertainment','Subscriptions'];
+  const cuts = sortedCats.filter(([c]) => discretionary.includes(c)).slice(0, 3);
+  const potentialSavings = cuts.reduce((s, [,amt]) => s + (amt / monthsInData) * 0.5, 0);
+  const monthsWithCut = monthlySurplus + potentialSavings > 0 ? remaining / (monthlySurplus + potentialSavings) : Infinity;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Goal</div>
+        <h2 className="text-2xl font-medium flex items-center gap-2" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>
+          {goal.emoji} {goal.name}
+        </h2>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-200 p-6">
+        <div className="flex items-baseline justify-between mb-3">
+          <div className="text-4xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmt(goal.current)}</div>
+          <div className="text-sm text-stone-500">of {fmt(goal.target)} · {Math.round(pct)}%</div>
+        </div>
+        <div className="h-3 bg-stone-100 rounded-full overflow-hidden mb-6">
+          <div className="h-full bg-rose-500 rounded-full transition-all" style={{ width: `${Math.min(100, pct)}%` }} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Currently saved</label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-stone-400">$</span>
+              <input type="number" value={goal.current} onChange={e => updateGoal('current', parseFloat(e.target.value) || 0)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Target</label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-stone-400">$</span>
+              <input type="number" value={goal.target} onChange={e => updateGoal('target', parseFloat(e.target.value) || 0)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Name</label>
+            <input type="text" value={goal.name} onChange={e => updateGoal('name', e.target.value)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-stone-50 rounded-xl p-5 border border-stone-200">
+          <div className="text-xs uppercase tracking-wider text-stone-500 mb-2">At current pace</div>
+          <div className="text-2xl font-medium mb-1" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmtMonths(monthsAtPace)}</div>
+          <div className="text-sm text-stone-600">saving {fmt(monthlySurplus)}/mo</div>
+        </div>
+        <div className={`rounded-xl p-5 border ${potentialSavings > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-stone-50 border-stone-200'}`}>
+          <div className={`text-xs uppercase tracking-wider mb-2 ${potentialSavings > 0 ? 'text-emerald-700' : 'text-stone-500'}`}>If you cut discretionary in half</div>
+          <div className={`text-2xl font-medium mb-1 ${potentialSavings > 0 ? 'text-emerald-900' : ''}`} style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmtMonths(monthsWithCut)}</div>
+          <div className={`text-sm ${potentialSavings > 0 ? 'text-emerald-700' : 'text-stone-600'}`}>+{fmt(potentialSavings)}/mo from {cuts.map(c => c[0]).join(', ') || 'top categories'}</div>
+        </div>
+      </div>
+
+      {cuts.length > 0 && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-6">
+          <div className="text-xs uppercase tracking-wider text-stone-500 mb-3">Where the opportunity is</div>
+          <div className="space-y-3">
+            {cuts.map(([cat, amt]) => {
+              const monthly = amt / monthsInData;
+              const halfSavings = monthly * 0.5;
+              return (
+                <div key={cat} className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium">{cat}</div>
+                    <div className="text-xs text-stone-500">currently {fmt(monthly)}/mo</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium text-emerald-700">+{fmt(halfSavings)}/mo</div>
+                    <div className="text-xs text-stone-500">if halved</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- LoansTab (unchanged behavior, demoted position) ----
+function LoansTab({ loans, updateLoan, settings, updateSetting, minOnlyScenario, extraScenario, totalLoanBalance, totalOriginal, weightedRate, avgIncome, avgMonthly }) {
+  const surplus = avgIncome - avgMonthly;
+  const maxAffordableExtra = Math.max(0, surplus - settings.standardPayment);
+  const sortedByRate = loans.slice().sort((a, b) => b.rate - a.rate);
+  const sortedByBalance = loans.filter(l => l.balance > 0).slice().sort((a, b) => a.balance - b.balance);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Loans</div>
+        <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmt(totalLoanBalance)} <span className="text-sm text-stone-500 font-sans">remaining at {weightedRate.toFixed(2)}% avg</span></h2>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-stone-200 bg-stone-50 grid grid-cols-12 gap-3 text-xs uppercase tracking-wider text-stone-500">
+          <div className="col-span-4">Loan</div>
+          <div className="col-span-3 text-right">Balance</div>
+          <div className="col-span-2 text-right">Original</div>
+          <div className="col-span-2 text-right">Rate</div>
+          <div className="col-span-1 text-right">Paid</div>
+        </div>
+        {loans.map((loan, i) => {
+          const pctPaid = loan.originalBalance > 0 ? (1 - loan.balance / loan.originalBalance) * 100 : 0;
+          return (
+            <div key={loan.id} className={`px-5 py-4 grid grid-cols-12 gap-3 items-center ${i < loans.length - 1 ? 'border-b border-stone-100' : ''}`}>
+              <div className="col-span-4">
+                <div className="text-sm font-medium">{loan.id}</div>
+                <div className="text-xs text-stone-500">{loan.name}</div>
+              </div>
+              <div className="col-span-3 text-right">
+                <input type="number" step="0.01" value={loan.balance} onChange={(e) => updateLoan(loan.id, 'balance', e.target.value)} className="w-28 h-8 px-2 text-sm text-right border border-stone-200 rounded-md" />
+              </div>
+              <div className="col-span-2 text-right text-sm text-stone-500">{fmt(loan.originalBalance)}</div>
+              <div className="col-span-2 text-right">
+                <input type="number" step="0.01" value={loan.rate} onChange={(e) => updateLoan(loan.id, 'rate', e.target.value)} className="w-16 h-8 px-2 text-sm text-right border border-stone-200 rounded-md" />
+                <span className="text-xs text-stone-500 ml-1">%</span>
+              </div>
+              <div className="col-span-1 text-right text-sm font-medium">{Math.round(pctPaid)}%</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Target className="w-4 h-4 text-stone-700" />
+          <h3 className="text-base font-medium">Payoff scenarios</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Standard payment</label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-stone-400">$</span>
+              <input type="number" value={settings.standardPayment} onChange={(e) => updateSetting('standardPayment', parseFloat(e.target.value) || 0)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md" />
+              <span className="text-sm text-stone-400">/mo</span>
+            </div>
+            <div className="text-xs text-stone-500 mt-1.5">Required minimum across all loans</div>
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Extra payment</label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-stone-400">$</span>
+              <input type="number" value={settings.extraPayment} onChange={(e) => updateSetting('extraPayment', parseFloat(e.target.value) || 0)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md" />
+              <span className="text-sm text-stone-400">/mo</span>
+            </div>
+            <div className="text-xs text-stone-500 mt-1.5">You can afford ~{fmt(maxAffordableExtra)} based on surplus</div>
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Strategy</label>
+            <select value={settings.strategy} onChange={(e) => updateSetting('strategy', e.target.value)} className="w-full h-9 px-3 text-sm border border-stone-200 rounded-md">
+              <option value="avalanche">Avalanche (highest rate first)</option>
+              <option value="snowball">Snowball (smallest balance first)</option>
+            </select>
+            <div className="text-xs text-stone-500 mt-1.5">Avalanche saves more interest</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-stone-50 rounded-xl p-5">
+            <div className="text-xs uppercase tracking-wider text-stone-500 mb-2">Minimum only</div>
+            <div className="text-2xl font-medium mb-1" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmtMonths(minOnlyScenario.months)}</div>
+            <div className="text-sm text-stone-600">{fmt(minOnlyScenario.totalInterest)} total interest</div>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+            <div className="text-xs uppercase tracking-wider text-emerald-700 mb-2">With extra payments</div>
+            <div className="text-2xl font-medium mb-1 text-emerald-900" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>{fmtMonths(extraScenario.months)}</div>
+            <div className="text-sm text-emerald-700">{fmt(extraScenario.totalInterest)} interest · saves {fmt(minOnlyScenario.totalInterest - extraScenario.totalInterest)}</div>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="text-xs uppercase tracking-wider text-stone-500 mb-3">Balance over time (with extra payments)</div>
+          <div style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={extraScenario.timeline}>
+                <defs>
+                  <linearGradient id="bal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f4" />
+                <XAxis dataKey="month" tickFormatter={v => `${v}mo`} tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={v => '$' + (v >= 1000 ? (v/1000).toFixed(0) + 'k' : v)} tick={{ fontSize: 11, fill: '#78716c' }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v) => fmt(v)} labelFormatter={l => `Month ${l}`} contentStyle={{ background: 'white', border: '1px solid #e7e5e4', borderRadius: 8, fontSize: 12 }} />
+                <Area type="monotone" dataKey="balance" stroke="#10b981" strokeWidth={2} fill="url(#bal)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-stone-900 text-white rounded-2xl p-6">
+        <div className="text-xs uppercase tracking-widest text-stone-400 mb-2">Recommendation</div>
+        <p className="text-sm leading-relaxed">
+          {settings.strategy === 'avalanche' && sortedByRate[0] ? (
+            <>Pay <span className="text-amber-400 font-medium">${settings.extraPayment}/mo extra</span> toward <span className="text-amber-400 font-medium">{sortedByRate[0].id} ({sortedByRate[0].rate}%)</span> until it's gone. Then roll the freed-up money into <span className="text-amber-400 font-medium">{sortedByRate[1]?.id}</span>, and so on.</>
+          ) : sortedByBalance[0] ? (
+            <>Pay <span className="text-amber-400 font-medium">${settings.extraPayment}/mo extra</span> toward <span className="text-amber-400 font-medium">{sortedByBalance[0].id} ({fmt(sortedByBalance[0].balance)})</span> first. Quick wins build momentum.</>
+          ) : (
+            <>All loans paid off. Redirect that money to savings or investments.</>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---- AskClaudeTab: chat with Anthropic API using spending context ----
+function AskClaudeTab({ transactions, spendingByCategory, monthlySpending, monthlyIncome, goal, avgIncome, avgMonthly, monthsToGoal, activeSubs, zombieSubs, recentSpending }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  const buildContext = () => {
+    const topCats = Object.entries(spendingByCategory).sort((a,b) => b[1]-a[1]).slice(0, 10);
+    const recentList = recentSpending.slice(0, 30).map(t => {
+      const d = new Date(t.date).toISOString().slice(0, 10);
+      return `${d} | ${t.category} | -$${Math.abs(t.amount).toFixed(2)} | ${t.desc}`;
+    }).join('\n');
+
+    return `You are Ahsan's personal finance assistant. Be blunt, specific, and transaction-level. No softening. Give concrete dollar amounts, not percentages. If he asks what to do, name the specific merchant or category.
+
+SNAPSHOT
+- Avg monthly income: $${avgIncome.toFixed(0)}
+- Avg monthly spending: $${avgMonthly.toFixed(0)}
+- Monthly surplus: $${(avgIncome - avgMonthly).toFixed(0)}
+- ${goal.name} goal: $${goal.current} / $${goal.target} (${fmtMonths(monthsToGoal)} at current pace)
+
+TOP SPENDING CATEGORIES (all-time totals)
+${topCats.map(([c, a]) => `- ${c}: $${a.toFixed(0)}`).join('\n')}
+
+ACTIVE RECURRING CHARGES
+${activeSubs.slice(0, 15).map(s => `- ${s.name}: $${s.perCharge.toFixed(2)} (${s.count} charges)`).join('\n') || '(none detected)'}
+
+ZOMBIE SUBSCRIPTIONS (cancelled but charged again)
+${zombieSubs.slice(0, 10).map(s => `- ${s.name}: $${s.perCharge.toFixed(2)}`).join('\n') || '(none)'}
+
+RECENT 14 DAYS OF SPENDING (date | category | amount | merchant)
+${recentList || '(nothing recent)'}
+`;
+  };
+
+  const send = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = { role: 'user', content: input.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system: buildContext(),
+          messages: newMessages.map(m => ({ role: m.role, content: m.content }))
+        })
+      });
+      const data = await resp.json();
+      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n') || '(no response)';
+      setMessages([...newMessages, { role: 'assistant', content: text }]);
+    } catch (err) {
+      setMessages([...newMessages, { role: 'assistant', content: `Error: ${err.message}. If you\'re running locally, check the API key and the \`anthropic-dangerous-direct-browser-access\` header.` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const suggestions = [
+    'What are my 3 worst spending habits?',
+    'What subscription should I cancel first?',
+    "If I cut restaurants in half, how fast do I hit my goal?",
+    'What did I waste money on last week?'
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-stone-500 mb-1">Ask Claude</div>
+        <h2 className="text-2xl font-medium" style={{ fontFamily: 'ui-serif, Georgia, serif' }}>Your money, interrogated</h2>
+        <p className="text-sm text-stone-600 mt-1">Your full spending context is sent with each question. Be specific. Claude is told to be blunt.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-200 flex flex-col" style={{ height: 560 }}>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center py-8">
+              <MessageCircle className="w-8 h-8 text-stone-300 mx-auto mb-3" />
+              <div className="text-sm text-stone-500 mb-4">Ask anything about your spending.</div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => setInput(s)} className="text-xs bg-stone-100 hover:bg-stone-200 text-stone-700 px-3 py-1.5 rounded-full">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-900'}`}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-stone-100 text-stone-500 px-4 py-2.5 rounded-2xl text-sm">thinking…</div>
+            </div>
+          )}
+        </div>
+        <div className="border-t border-stone-200 p-3 flex items-center gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') send(); }}
+            placeholder="Ask about your spending…"
+            className="flex-1 h-10 px-3 text-sm border border-stone-200 rounded-lg focus:outline-none focus:border-stone-400"
+          />
+          <button onClick={send} disabled={loading || !input.trim()} className="h-10 px-4 bg-stone-900 text-white rounded-lg text-sm font-medium disabled:bg-stone-300 flex items-center gap-1.5">
+            <Send className="w-3.5 h-3.5" /> Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+    // ---- Mount ----
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<FinanceDashboard />);
+  </script>
+</body>
+</html>
